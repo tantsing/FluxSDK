@@ -27,8 +27,9 @@ jobs:
             --hidden-import "uvicorn.protocols.http.auto" `
             --collect-all "bleak" `
             main.py
+      - run: cd dist && powershell Compress-Archive -Path OmniFlux.exe -DestinationPath OmniFlux-windows.zip
       - uses: actions/upload-artifact@v4
-        with: { name: OmniFlux-Windows, path: dist/OmniFlux.exe }
+        with: { name: OmniFlux-Windows, path: dist/OmniFlux-windows.zip }
 
   build-macos:
     runs-on: macos-latest
@@ -85,7 +86,7 @@ jobs:
           path: artifacts
       - run: |
           mkdir release
-          mv artifacts/OmniFlux-Windows/OmniFlux.exe release/OmniFlux-windows.exe
+          mv artifacts/OmniFlux-Windows/OmniFlux-windows.zip release/OmniFlux-windows.zip
           mv artifacts/OmniFlux-macOS/OmniFlux.dmg release/OmniFlux-macos.dmg
           mv artifacts/OmniFlux-Linux/OmniFlux-linux.tar.gz release/OmniFlux-linux.tar.gz
       - uses: softprops/action-gh-release@v2

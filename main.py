@@ -2,7 +2,6 @@
 import sys
 import os
 import threading
-import webbrowser
 import time
 import subprocess
 import warnings
@@ -14,13 +13,13 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 
 
 def open_browser(port: int):
-    """Wait for server to be ready, then open browser"""
+    """Wait for server to be ready, then open browser using native OS calls"""
     import urllib.request
 
     url = f"http://localhost:{port}"
 
-    # Wait for server to actually start (up to 10 seconds)
-    for _ in range(20):
+    # Wait for server to start (up to 15 seconds for slow PyInstaller startup)
+    for _ in range(30):
         time.sleep(0.5)
         try:
             resp = urllib.request.urlopen(url)
@@ -29,22 +28,27 @@ def open_browser(port: int):
         except Exception:
             pass
 
-    # Open browser — try multiple strategies per platform
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
-
-    time.sleep(0.5)
-
-    # Fallback: platform-native open
+    # Launch browser via OS-native subprocess (bypasses webbrowser module issues)
     try:
         if sys.platform == "win32":
-            os.startfile(url)
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                creationflags=subprocess.DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         elif sys.platform == "darwin":
-            subprocess.run(["open", url], timeout=5)
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         else:
-            subprocess.run(["xdg-open", url], timeout=5)
+            subprocess.Popen(
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     except Exception:
         pass
 
@@ -57,10 +61,8 @@ def main():
     print(f"  本地访问: http://localhost:{port}")
     print(f"  按 Ctrl+C 退出\n")
 
-    # 启动浏览器
     threading.Thread(target=open_browser, args=(port,), daemon=True).start()
 
-    # 启动服务器
     from backend.server import run_server
     run_server(host=host, port=port)
 
