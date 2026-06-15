@@ -150,7 +150,7 @@ def _handle_client(conn: socket.socket, store):
             regs = _pack_registers(store.latest_data, store.packet_count)
 
             byte_count = quantity * 2
-            resp_data = struct.pack(">B", byte_count)
+            resp_data = bytes([0x03, byte_count])
             for i in range(start_addr, start_addr + quantity):
                 resp_data += struct.pack(">H", regs.get(i, 0))
 
