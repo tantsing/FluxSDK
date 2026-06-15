@@ -956,9 +956,11 @@ function updateDataFileInfo() {
 }
 
 /* ===================== DATA UPDATE ===================== */
+let _chartDirty = true;
+let _lastChartDraw = 0;
+
 function updateData(p) {
   packetBadge.textContent = `接收 ${p._packet_count || 0}`;
-  updateDataFileInfo();
 
   // Hero agtron number
   const agEl = agtronValue;
@@ -997,10 +999,16 @@ function updateData(p) {
     item.querySelector('.item-value').textContent = p.boom2_count;
   });
 
-  // Chart
+  // Chart — throttle to 300ms
   chartData.push(p.roc);
   if (chartData.length > CHART_SIZE) chartData.shift();
-  drawChart();
+  _chartDirty = true;
+  const now = Date.now();
+  if (now - _lastChartDraw > 300) {
+    _lastChartDraw = now;
+    _chartDirty = false;
+    drawChart();
+  }
 }
 
 function updateItem(id, newVal, decimals, unit, updateFn) {
@@ -1134,6 +1142,10 @@ function deselectAll() {
 renderActions();
 connectWS();
 
+// Update data file info periodically (not on every packet)
+setInterval(updateDataFileInfo, 2000);
+updateDataFileInfo();
+
 // Initial status fetch
 (async () => {
   try {
@@ -1145,6 +1157,15 @@ connectWS();
     }
   } catch (e) { /* server not ready */ }
 })();
+
+// Flush chart when no new data arrives
+setInterval(() => {
+  if (_chartDirty) {
+    _chartDirty = false;
+    _lastChartDraw = Date.now();
+    drawChart();
+  }
+}, 500);
 </script>
 
 </body>

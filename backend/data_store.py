@@ -81,26 +81,14 @@ class DataStore:
         return self._data_file
 
     def _on_bluetooth_data(self, data: bytes):
-        hex_str = data.hex(' ')
-        print(f"\n[RAW] len={len(data)} | {hex_str}", flush=True)
-
         sensor = self.parser.parse_response(data)
         if sensor is None:
-            print("[PARSER] SKIP (no Cmd 6 frame found)", flush=True)
             return
-
-        print(f"[PARSED] t={sensor.time_sec}s dist={sensor.distance}mm "
-              f"agtron={sensor.agtron:.1f} roc={sensor.roc:.1f} "
-              f"t1={sensor.t1:.1f}℃ ror1={sensor.ror1:.2f} "
-              f"t2={sensor.t2:.1f}℃ ror2={sensor.ror2:.2f} "
-              f"t1v={sensor.t1_valid} t2v={sensor.t2_valid} "
-              f"b1={sensor.boom1_count} b2={sensor.boom2_count}", flush=True)
 
         self._packet_count += 1
         self._latest_data = sensor
-        self._save_to_file(sensor)
 
-        # 广播给所有 WebSocket 订阅者
+        # Broadcast to WebSocket subscribers FIRST — before any file I/O
         payload = sensor.model_dump()
         payload["_packet_count"] = self._packet_count
         for q in self._subscribers:
@@ -108,6 +96,14 @@ class DataStore:
                 q.put_nowait(payload)
             except asyncio.QueueFull:
                 pass
+
+        # File I/O in background thread to avoid blocking BLE callback
+        import threading
+        threading.Thread(
+            target=self._save_to_file,
+            args=(sensor,),
+            daemon=True,
+        ).start()
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=256)
