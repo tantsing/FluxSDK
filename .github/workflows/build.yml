@@ -69,8 +69,9 @@ jobs:
             --hidden-import "uvicorn.protocols.http.auto" \
             --collect-all "bleak" \
             main.py
+      - run: cd dist && tar -czf OmniFlux-linux.tar.gz OmniFlux
       - uses: actions/upload-artifact@v4
-        with: { name: OmniFlux-Linux, path: dist/OmniFlux }
+        with: { name: OmniFlux-Linux, path: dist/OmniFlux-linux.tar.gz }
 
   release:
     needs: [build-windows, build-macos, build-linux]
@@ -86,7 +87,7 @@ jobs:
           mkdir release
           mv artifacts/OmniFlux-Windows/OmniFlux.exe release/OmniFlux-windows.exe
           mv artifacts/OmniFlux-macOS/OmniFlux.dmg release/OmniFlux-macos.dmg
-          mv artifacts/OmniFlux-Linux/OmniFlux release/OmniFlux-linux
+          mv artifacts/OmniFlux-Linux/OmniFlux-linux.tar.gz release/OmniFlux-linux.tar.gz
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
