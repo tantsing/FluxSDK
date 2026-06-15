@@ -20,6 +20,7 @@ jobs:
       - run: |
           pyinstaller --onefile --console `
             --name "OmniFlux" `
+            --version-file version_info.txt `
             --add-data "frontend;frontend" `
             --add-data "backend;backend" `
             --hidden-import "uvicorn.logging" `
