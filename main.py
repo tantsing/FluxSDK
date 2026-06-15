@@ -20,15 +20,24 @@ def main():
     print(f"  本地访问: http://localhost:{port}")
     print(f"  按 Ctrl+C 退出\n")
 
-    from backend.server import run_server
+    from backend.server import run_server, store
 
-    # Start server in background thread
-    server_thread = threading.Thread(
+    # Start HTTP server in background thread
+    threading.Thread(
         target=run_server,
         args=(host, port),
         daemon=True,
-    )
-    server_thread.start()
+    ).start()
+
+    # Start MODBUS TCP server (port 502, for Artisan connection)
+    modbus_port = 502
+    from backend.modbus_server import run_modbus_server
+    threading.Thread(
+        target=run_modbus_server,
+        args=(store, host, modbus_port),
+        daemon=True,
+    ).start()
+    print(f"  MODBUS TCP: localhost:{modbus_port}")
 
     # Wait for server to be ready, then open browser
     import urllib.request
