@@ -38,7 +38,7 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt pyinstaller
       - run: |
-          pyinstaller --onefile --console \
+          pyinstaller --onefile --windowed \
             --name "OmniFlux" \
             --add-data "frontend:frontend" \
             --add-data "backend:backend" \
@@ -47,8 +47,9 @@ jobs:
             --hidden-import "uvicorn.protocols.http.auto" \
             --collect-all "bleak" \
             main.py
+      - run: cd dist && zip -r OmniFlux-macos.zip OmniFlux.app
       - uses: actions/upload-artifact@v4
-        with: { name: OmniFlux-macOS, path: dist/OmniFlux }
+        with: { name: OmniFlux-macOS, path: dist/OmniFlux-macos.zip }
 
   build-linux:
     runs-on: ubuntu-latest
@@ -84,7 +85,7 @@ jobs:
       - run: |
           mkdir release
           mv artifacts/OmniFlux-Windows/OmniFlux.exe release/OmniFlux-windows.exe
-          mv artifacts/OmniFlux-macOS/OmniFlux release/OmniFlux-macos
+          mv artifacts/OmniFlux-macOS/OmniFlux-macos.zip release/OmniFlux-macos.zip
           mv artifacts/OmniFlux-Linux/OmniFlux release/OmniFlux-linux
       - uses: softprops/action-gh-release@v2
         with:

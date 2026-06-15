@@ -13,9 +13,24 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 
 
 def open_browser(port: int):
-    """延迟打开浏览器（等待服务器启动）"""
-    time.sleep(1.2)
-    webbrowser.open(f"http://localhost:{port}")
+    """Wait for server to be ready, then open browser"""
+    import urllib.request
+
+    # Wait for server to actually start (up to 10 seconds)
+    for _ in range(20):
+        time.sleep(0.5)
+        try:
+            resp = urllib.request.urlopen(f"http://localhost:{port}")
+            resp.close()
+            break
+        except Exception:
+            pass
+
+    # Try to open browser
+    try:
+        webbrowser.open(f"http://localhost:{port}")
+    except Exception:
+        pass
 
 
 def main():

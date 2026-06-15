@@ -130,7 +130,7 @@ async def websocket_endpoint(ws: WebSocket):
 
 # Resolve frontend directory (handles PyInstaller frozen mode)
 if getattr(sys, 'frozen', False):
-    _base_dir = os.path.dirname(os.path.abspath(sys.executable))
+    _base_dir = sys._MEIPASS
 else:
     _base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
