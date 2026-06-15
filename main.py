@@ -28,15 +28,10 @@ def open_browser(port: int):
         except Exception:
             pass
 
-    # Launch browser via OS-native subprocess (bypasses webbrowser module issues)
+    # Launch browser via OS-native call
     try:
         if sys.platform == "win32":
-            subprocess.Popen(
-                ["cmd", "/c", "start", "", url],
-                creationflags=subprocess.DETACHED_PROCESS,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            os.startfile(url)
         elif sys.platform == "darwin":
             subprocess.Popen(
                 ["open", url],
