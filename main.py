@@ -30,11 +30,11 @@ def main():
     ).start()
 
     # Start MODBUS TCP server (port 502, for Artisan connection)
-    modbus_port = 502
+    modbus_port = 1502
     from backend.modbus_server import run_modbus_server
     threading.Thread(
         target=run_modbus_server,
-        args=(store, host, modbus_port),
+        args=(host, modbus_port),
         daemon=True,
     ).start()
     print(f"  MODBUS TCP: localhost:{modbus_port}")

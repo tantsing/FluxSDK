@@ -97,13 +97,7 @@ class DataStore:
             except asyncio.QueueFull:
                 pass
 
-        # File I/O in background thread to avoid blocking BLE callback
-        import threading
-        threading.Thread(
-            target=self._save_to_file,
-            args=(sensor,),
-            daemon=True,
-        ).start()
+        self._save_to_file(sensor)
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=256)
