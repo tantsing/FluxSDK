@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OmniFlux</title>
+<style>
+/* ===== FONTS ===== */
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Gothic+A1:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ===== TOKENS ===== */
+:root {
+  --bg-root:       #0B0E14;
+  --bg-surface:    #141821;
+  --bg-raised:     #1C2130;
+  --accent:        #C4873A;
+  --accent-glow:   rgba(196,135,58,0.18);
+  --accent-cool:   #5B9AA0;
+  --cool-glow:     rgba(91,154,160,0.15);
+  --danger:        #C05A4A;
+  --text-primary:  #ECE4D5;
+  --text-dim:      #7A766F;
+  --text-code:     #9EBCA8;
+  --border:        rgba(255,255,255,0.06);
+  --radius:        10px;
+  --radius-sm:     6px;
+  --transition:    180ms ease;
+}
+
+/* ===== RESET ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 15px; }
+body {
+  font-family: "Gothic A1", -apple-system, sans-serif;
+  background: var(--bg-root);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle thermal background gradient */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 50% 40% at 30% 20%, rgba(196,135,58,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 50% at 70% 60%, rgba(91,154,160,0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ===== LAYOUT ===== */
+.app {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 100vh;
+}
+
+/* ===== HEADER ===== */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.logo {
+  font-family: "Gothic A1", sans-serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+.logo-accent {
+  color: var(--accent);
+}
+
+/* Status indicator */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+  position: relative;
+}
+.status-dot.connected {
+  background: #4CAF80;
+  box-shadow: 0 0 8px rgba(76,175,128,0.5);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+.status-dot.scanning {
+  background: #D4A040;
+  animation: blink-dot 0.6s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 6px rgba(76,175,128,0.4); }
+  50% { box-shadow: 0 0 14px rgba(76,175,128,0.7); }
+}
+@keyframes blink-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.status-text {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.packet-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--text-code);
+  background: var(--bg-raised);
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+}
+
+/* ===== MAIN GRID ===== */
+.main-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr 260px;
+  gap: 20px;
+  align-items: start;
+}
+
+/* ===== CARD ===== */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.card-header {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  margin-bottom: 14px;
+  font-weight: 600;
+}
+
+/* ===== LEFT PANEL ===== */
+.left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.device-list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.device-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid transparent;
+}
+.device-item:hover {
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+.device-item.selected {
+  border-color: var(--accent);
+  background: rgba(196,135,58,0.08);
+}
+.device-item .rssi {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.empty-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.btn {
+  font-family: "Gothic A1", sans-serif;
+  font-weight: 500;
+  font-size: 0.82rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  cursor: pointer;
+  transition: all var(--transition);
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: #D4953F; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-secondary {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { border-color: rgba(255,255,255,0.15); }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(192,90,74,0.3);
+}
+.btn-danger:hover { background: rgba(192,90,74,0.1); border-color: var(--danger); }
+
+/* ===== CONNECT ACTIONS ===== */
+.connect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.connect-actions .btn {
+  width: 100%;
+}
+.connect-actions .btn-main {
+  padding: 12px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.connect-actions .btn-sub {
+  padding: 6px 12px;
+  font-size: 0.7rem;
+  font-weight: 400;
+  opacity: 0.7;
+}
+.connect-actions .btn-sub:hover { opacity: 1; }
+
+/* ===== CONNECTED DEVICE DISPLAY ===== */
+.connected-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  margin-bottom: 14px;
+}
+.connected-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4CAF80;
+  box-shadow: 0 0 6px rgba(76,175,128,0.5);
+  flex-shrink: 0;
+}
+.connected-name {
+  font-weight: 500;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+}
+.connected-time {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+/* ===== SELECT HINT TOOLTIP ===== */
+.select-hint {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 6px 0 2px;
+  font-style: italic;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-row .btn {
+  flex: 1;
+  min-width: 80px;
+  white-space: nowrap;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.input-group input {
+  width: 60px;
+  padding: 8px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  text-align: center;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.input-group input:focus { border-color: var(--accent); }
+.input-group input.invalid { border-color: var(--danger); }
+.input-group .unit {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+/* ===== CENTER PANEL ===== */
+
+/* Big hero number — signature element */
+.hero-number {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 0 16px;
+  position: relative;
+}
+.hero-number .value {
+  font-family: "DM Serif Display", serif;
+  font-size: 5.5rem;
+  line-height: 1;
+  color: var(--text-primary);
+  transition: color 120ms ease;
+  position: relative;
+}
+.hero-number .value.flash {
+  color: var(--accent);
+}
+.hero-number .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+.mini-chart-wrap {
+  width: 100%;
+  height: 72px;
+  position: relative;
+}
+.mini-chart-wrap canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.data-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+.data-item {
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background 100ms ease, opacity 200ms ease;
+  position: relative;
+}
+.data-item.hidden {
+  display: none;
+}
+.data-item.flash {
+  background: rgba(196,135,58,0.12);
+}
+.data-item .item-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.data-item .item-value {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text-code);
+}
+.data-item .item-unit {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+.data-item.temp .item-value { color: var(--accent-cool); }
+.data-item.boom .item-value { color: var(--accent); }
+.data-item.rate .item-value { color: var(--accent); }
+
+/* ===== RIGHT PANEL ===== */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.field-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  transition: all var(--transition);
+}
+.field-check:hover { color: var(--text-primary); background: var(--bg-raised); }
+.field-check input { display: none; }
+.field-check .checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.field-check input:checked + .checkbox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.field-check input:checked + .checkbox::after {
+  content: '✓';
+  font-size: 9px;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ===== TOAST ===== */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 500;
+  animation: toast-in 280ms ease;
+  max-width: 320px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.toast.warn {
+  background: rgba(196,135,58,0.15);
+  border: 1px solid rgba(196,135,58,0.3);
+  color: var(--accent);
+}
+.toast.error {
+  background: rgba(192,90,74,0.15);
+  border: 1px solid rgba(192,90,74,0.35);
+  color: var(--danger);
+}
+.toast.info {
+  background: rgba(91,154,160,0.12);
+  border: 1px solid rgba(91,154,160,0.25);
+  color: var(--accent-cool);
+}
+.toast.hiding {
+  animation: toast-out 260ms ease forwards;
+}
+@keyframes toast-in {
+  from { transform: translateX(110%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes toast-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(110%); opacity: 0; }
+}
+
+/* ===== EMPTY STATE ===== */
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px;
+}
+.empty-state .ring {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+}
+.empty-state p {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 960px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+  .hero-number .value { font-size: 3.5rem; }
+  .app { padding: 16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-left">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="logo">Omni<span class="logo-accent">Flux</span></span>
+      <span class="status-text" id="statusText">未连接</span>
+    </div>
+    <div class="header-right">
+      <span class="packet-badge" id="packetBadge">接收 0</span>
+    </div>
+  </header>
+
+  <!-- MAIN GRID -->
+  <div class="main-grid">
+
+    <!-- LEFT PANEL -->
+    <aside class="left-panel">
+      <div class="card device-card">
+        <div class="card-header">设备连接</div>
+
+        <!-- Pre-connection: device list -->
+        <div id="deviceListArea">
+          <div class="device-list" id="deviceList">
+            <div class="empty-hint">点击扫描查找设备</div>
+          </div>
+        </div>
+
+        <!-- Connected: device info -->
+        <div id="deviceInfoArea" style="display:none">
+          <div class="connected-device">
+            <span class="connected-dot"></span>
+            <span class="connected-name" id="connectedName"></span>
+            <span class="connected-time" id="connectedTime"></span>
+          </div>
+        </div>
+
+        <!-- Dynamic action buttons -->
+        <div class="connect-actions" id="connectActions"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">采样设置</div>
+        <div class="input-group">
+          <label style="font-size:0.78rem;color:var(--text-dim)">间隔</label>
+          <input type="number" id="intervalInput" value="1" min="0.1" max="60" step="0.1">
+          <span class="unit">秒</span>
+          <button class="btn btn-secondary" onclick="setInterval_()" style="padding:6px 10px;font-size:0.72rem;">应用</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">数据文件</div>
+        <div style="font-size:0.75rem;color:var(--text-dim);margin-bottom:8px;" id="dataFilePath">--</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:0.68rem;color:var(--text-code);background:var(--bg-raised);padding:8px 10px;border-radius:var(--radius-sm);word-break:break-all;" id="dataFileContent">等待数据...</div>
+      </div>
+    </aside>
+
+    <!-- CENTER -->
+    <main class="card" style="display:flex;flex-direction:column;">
+      <div class="card-header">实时色值</div>
+
+      <div id="emptyState" class="empty-state">
+        <div class="ring">⊕</div>
+        <p>连接 OmniFlux 设备<br>实时数据将在此显示</p>
+      </div>
+
+      <div id="dataArea" style="display:none;flex-direction:column;flex:1;">
+        <div id="heroArea">
+          <div class="hero-number">
+            <div class="value" id="agtronValue">0.0</div>
+            <div class="label">Agtron 色值</div>
+          </div>
+          <div class="mini-chart-wrap">
+            <canvas id="miniChart"></canvas>
+          </div>
+        </div>
+        <div class="data-grid">
+          <div class="data-item" id="item-agtron">
+            <span class="item-label">色值</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">Agt</span></span>
+          </div>
+          <div class="data-item rate" id="item-roc">
+            <span class="item-label">色值变化率</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">Agt/min</span></span>
+          </div>
+          <div class="data-item" id="item-distance">
+            <span class="item-label">TOF 距离</span>
+            <span><span class="item-value">0</span><span class="item-unit">mm</span></span>
+          </div>
+          <div class="data-item temp" id="item-t1">
+            <span class="item-label">探针 TC1</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">℃</span></span>
+          </div>
+          <div class="data-item temp" id="item-t2">
+            <span class="item-label">探针 TC2</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">℃</span></span>
+          </div>
+          <div class="data-item rate" id="item-ror1">
+            <span class="item-label">TC1 升温速率</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">℃/min</span></span>
+          </div>
+          <div class="data-item rate" id="item-ror2">
+            <span class="item-label">TC2 升温速率</span>
+            <span><span class="item-value">0.0</span><span class="item-unit">℃/min</span></span>
+          </div>
+          <div class="data-item boom" id="item-boom1_count">
+            <span class="item-label">一爆次数</span>
+            <span class="item-value">0</span>
+          </div>
+          <div class="data-item boom" id="item-boom2_count">
+            <span class="item-label">二爆次数</span>
+            <span class="item-value">0</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANEL -->
+    <aside class="right-panel">
+      <div class="card">
+        <div class="card-header">显示字段</div>
+        <div class="btn-row" style="margin-bottom:10px">
+          <button class="btn btn-secondary" onclick="selectAll()" style="font-size:0.7rem;padding:5px 10px;">全选</button>
+          <button class="btn btn-secondary" onclick="deselectAll()" style="font-size:0.7rem;padding:5px 10px;">取消</button>
+        </div>
+        <div class="field-list" id="fieldList"></div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+/* ===================== STATE ===================== */
+const CHART_SIZE = 60;
+let chartData = new Array(CHART_SIZE).fill(null);
+let ws = null;
+let selectedDevice = null;
+let devices = [];
+let connected = false;
+let scanning = false;
+let connecting = false;
+let connStartTime = null;
+let connTimer = null;
+
+/* ===================== DOM REFS ===================== */
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+const statusDot = $('#statusDot');
+const statusText = $('#statusText');
+const packetBadge = $('#packetBadge');
+const deviceList = $('#deviceList');
+const deviceListArea = $('#deviceListArea');
+const deviceInfoArea = $('#deviceInfoArea');
+const connectedName = $('#connectedName');
+const connectedTime = $('#connectedTime');
+const connectActions = $('#connectActions');
+const emptyState = $('#emptyState');
+const dataArea = $('#dataArea');
+const agtronValue = $('#agtronValue');
+const miniChart = $('#miniChart');
+const toastContainer = $('#toastContainer');
+const intervalInput = $('#intervalInput');
+const fieldList = $('#fieldList');
+
+/* ===================== TOAST ===================== */
+function toast(msg, level = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${level}`;
+  el.textContent = msg;
+  toastContainer.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('hiding');
+    setTimeout(() => el.remove(), 300);
+  }, 3000);
+}
+
+/* ===================== STATE MACHINE ===================== */
+/*
+  States:
+    IDLE        — no scan yet
+    SCANNING    — scan in progress
+    LISTING     — devices shown, none/maybe selected
+    CONNECTING  — connection attempt in progress
+    CONNECTED   — actively connected
+*/
+function renderActions() {
+  let html = '';
+
+  if (connected) {
+    html = '<button class="btn btn-danger btn-main" onclick="disconnect()">断开连接</button>';
+  } else if (connecting) {
+    html = '<button class="btn btn-primary btn-main" disabled>连接中...</button>';
+  } else if (scanning) {
+    html = '<button class="btn btn-primary btn-main" disabled>扫描中...</button>';
+  } else if (selectedDevice) {
+    html = `<button class="btn btn-primary btn-main" onclick="connect()">连接 ${selectedDevice.name}</button>
+            <button class="btn btn-secondary btn-sub" onclick="scan()">重新扫描</button>`;
+  } else if (devices.length > 0) {
+    html = `<button class="btn btn-secondary btn-main" disabled>选择设备以连接</button>
+            <button class="btn btn-secondary btn-sub" onclick="scan()">重新扫描</button>`;
+  } else {
+    html = '<button class="btn btn-primary btn-main" onclick="scan()">扫描设备</button>';
+  }
+
+  connectActions.innerHTML = html;
+}
+
+function setConnected(c, name) {
+  connected = c;
+  if (c) {
+    // Switch to connected UI
+    statusDot.className = 'status-dot connected';
+    statusText.textContent = name || '已连接';
+    deviceListArea.style.display = 'none';
+    deviceInfoArea.style.display = 'block';
+    connectedName.textContent = name || '';
+    emptyState.style.display = 'none';
+    dataArea.style.display = 'flex';
+    chartData = new Array(CHART_SIZE).fill(null);
+
+    // Track connection duration
+    connStartTime = Date.now();
+    updateConnTime();
+    connTimer = setInterval(updateConnTime, 1000);
+  } else {
+    // Switch back to scanning UI
+    statusDot.className = 'status-dot';
+    statusText.textContent = '未连接';
+    deviceListArea.style.display = 'block';
+    deviceInfoArea.style.display = 'none';
+    emptyState.style.display = 'flex';
+    dataArea.style.display = 'none';
+
+    if (connTimer) { clearInterval(connTimer); connTimer = null; }
+    connStartTime = null;
+  }
+  renderActions();
+}
+
+function updateConnTime() {
+  if (!connStartTime) return;
+  const sec = Math.floor((Date.now() - connStartTime) / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  connectedTime.textContent = `已连接 ${m}:${String(s).padStart(2, '0')}`;
+}
+
+/* ===================== DEVICE OPERATIONS ===================== */
+
+function renderDeviceList() {
+  if (devices.length === 0) {
+    deviceList.innerHTML = '<div class="empty-hint">未发现设备</div>';
+    return;
+  }
+  deviceList.innerHTML = devices.map(d => {
+    const sel = selectedDevice && selectedDevice.address === d.address ? ' selected' : '';
+    return `<div class="device-item${sel}" data-addr="${d.address}">
+      <span>${d.name}</span>
+      <span class="rssi">${d.rssi} dBm</span>
+    </div>`;
+  }).join('');
+
+  deviceList.querySelectorAll('.device-item').forEach(el => {
+    el.addEventListener('click', () => {
+      deviceList.querySelectorAll('.device-item').forEach(e => e.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedDevice = devices.find(d => d.address === el.dataset.addr);
+      renderActions();
+    });
+  });
+}
+
+async function scan() {
+  scanning = true;
+  selectedDevice = null;
+  renderActions();
+
+  statusDot.className = 'status-dot scanning';
+  statusText.textContent = '扫描中...';
+
+  try {
+    const res = await fetch('/api/scan', { method: 'POST' });
+    const data = await res.json();
+    devices = data.devices || [];
+    renderDeviceList();
+    if (devices.length === 0) {
+      toast('未发现 OmniFlux 设备', 'warn');
+    }
+  } catch (e) {
+    toast('扫描失败，请检查蓝牙是否可用', 'error');
+  } finally {
+    scanning = false;
+    if (!connected) {
+      statusDot.className = 'status-dot';
+      statusText.textContent = '未连接';
+    }
+    renderActions();
+  }
+}
+
+async function connect() {
+  if (!selectedDevice) return;
+  connecting = true;
+  renderActions();
+
+  try {
+    const res = await fetch('/api/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: selectedDevice.address })
+    });
+    const data = await res.json();
+    if (data.success) {
+      setConnected(true, data.device_name);
+    } else {
+      toast('连接失败，请重试', 'error');
+    }
+  } catch (e) {
+    toast('连接出错', 'error');
+  } finally {
+    connecting = false;
+    renderActions();
+  }
+}
+
+async function disconnect() {
+  try {
+    await fetch('/api/disconnect', { method: 'POST' });
+  } catch (e) { /* ignore */ }
+  setConnected(false, null);
+  // Keep device list so user can reconnect
+  selectedDevice = null;
+  renderDeviceList();
+  renderActions();
+}
+
+async function setInterval_() {
+  const v = parseFloat(intervalInput.value);
+  if (isNaN(v) || v <= 0 || v > 60) {
+    intervalInput.classList.add('invalid');
+    toast('间隔必须在 0.1 ~ 60 秒之间', 'error');
+    setTimeout(() => intervalInput.classList.remove('invalid'), 2000);
+    return;
+  }
+  intervalInput.classList.remove('invalid');
+  try {
+    await fetch('/api/interval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interval: v })
+    });
+  } catch (e) { /* ignore */ }
+}
+
+/* ===================== WEBSOCKET ===================== */
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onmessage = (evt) => {
+    const msg = JSON.parse(evt.data);
+    if (msg.type === 'data') {
+      updateData(msg.payload);
+    } else if (msg.type === 'disconnected') {
+      toast('设备已断开连接', 'error');
+      setConnected(false, null);
+      selectedDevice = null;
+      renderDeviceList();
+      renderActions();
+    }
+  };
+
+  ws.onclose = () => {
+    if (connected) {
+      setConnected(false, null);
+      toast('设备连接已断开', 'error');
+    }
+    setTimeout(connectWS, 2000);
+  };
+}
+
+/* ===================== DATA FILE INFO ===================== */
+function updateDataFileInfo() {
+  fetch('/api/datafile')
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('dataFilePath').textContent = d.path || '--';
+      if (d.content) {
+        document.getElementById('dataFileContent').textContent = d.content;
+      }
+    })
+    .catch(() => {});
+}
+
+/* ===================== DATA UPDATE ===================== */
+function updateData(p) {
+  packetBadge.textContent = `接收 ${p._packet_count || 0}`;
+  updateDataFileInfo();
+
+  // Hero agtron number
+  const agEl = agtronValue;
+  if (agEl.textContent !== p.agtron.toFixed(1)) {
+    agEl.textContent = p.agtron.toFixed(1);
+    agEl.classList.add('flash');
+    setTimeout(() => agEl.classList.remove('flash'), 120);
+  }
+
+  // Data grid items
+  updateItem('agtron', p.agtron, 1, 'Agt', item => {
+    item.querySelector('.item-value').textContent = p.agtron.toFixed(1);
+  });
+  updateItem('roc', p.roc, 1, null, item => {
+    item.querySelector('.item-value').textContent = p.roc.toFixed(1);
+  });
+  updateItem('distance', p.distance, 0, 'mm', item => {
+    item.querySelector('.item-value').textContent = p.distance;
+  });
+  updateItem('t1', p.t1, 1, '℃', item => {
+    item.querySelector('.item-value').textContent = p.t1.toFixed(1);
+  });
+  updateItem('t2', p.t2, 1, '℃', item => {
+    item.querySelector('.item-value').textContent = p.t2.toFixed(1);
+  });
+  updateItem('ror1', p.ror1, 1, '℃/min', item => {
+    item.querySelector('.item-value').textContent = p.ror1.toFixed(1);
+  });
+  updateItem('ror2', p.ror2, 1, '℃/min', item => {
+    item.querySelector('.item-value').textContent = p.ror2.toFixed(1);
+  });
+  updateItem('boom1_count', p.boom1_count, 0, '', item => {
+    item.querySelector('.item-value').textContent = p.boom1_count;
+  });
+  updateItem('boom2_count', p.boom2_count, 0, '', item => {
+    item.querySelector('.item-value').textContent = p.boom2_count;
+  });
+
+  // Chart
+  chartData.push(p.roc);
+  if (chartData.length > CHART_SIZE) chartData.shift();
+  drawChart();
+}
+
+function updateItem(id, newVal, decimals, unit, updateFn) {
+  const item = document.getElementById('item-' + id);
+  if (!item) return;
+  const oldText = item.querySelector('.item-value')?.textContent || '';
+  const newText = decimals ? newVal.toFixed(decimals) : String(newVal);
+  if (oldText !== newText) {
+    updateFn(item);
+    item.classList.add('flash');
+    setTimeout(() => item.classList.remove('flash'), 200);
+  }
+}
+
+/* ===================== CHART ===================== */
+function drawChart() {
+  const canvas = miniChart;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const w = rect.width;
+  const h = rect.height;
+  canvas.width = w * (window.devicePixelRatio || 1);
+  canvas.height = h * (window.devicePixelRatio || 1);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+
+  const valid = chartData.filter(v => v !== null);
+  if (valid.length < 2) return;
+
+  const padding = { top: 10, right: 8, bottom: 10, left: 8 };
+  const pw = w - padding.left - padding.right;
+  const ph = h - padding.top - padding.bottom;
+
+  const min = Math.min(...valid) - 1;
+  const max = Math.max(...valid) + 1;
+  const range = max - min || 1;
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, padding.top, 0, padding.top + ph);
+  grad.addColorStop(0, 'rgba(196,135,58,0.18)');
+  grad.addColorStop(1, 'rgba(196,135,58,0.0)');
+
+  const xStep = pw / (CHART_SIZE - 1);
+
+  ctx.beginPath();
+  let firstDraw = true;
+  for (let i = 0; i < chartData.length; i++) {
+    if (chartData[i] === null) { firstDraw = true; continue; }
+    const x = padding.left + i * xStep;
+    const y = padding.top + ph - ((chartData[i] - min) / range * ph);
+    if (firstDraw) { ctx.moveTo(x, y); firstDraw = false; }
+    else { ctx.lineTo(x, y); }
+  }
+  const lastX = padding.left + (chartData.length - 1) * xStep;
+
+  ctx.strokeStyle = 'rgba(196,135,58,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.lineTo(lastX, padding.top + ph);
+  ctx.lineTo(padding.left, padding.top + ph);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+// Redraw chart on resize
+window.addEventListener('resize', drawChart);
+
+/* ===================== FIELDS ===================== */
+// Fields that have visible data items (others: time_sec, t1_valid, t2_valid are hidden)
+const FIELD_META = {
+  agtron:          ["色值", "Agt"],
+  distance:        ["TOF 距离", "mm"],
+  roc:             ["色值变化率", "Agt/min"],
+  t1:              ["探针 TC1", "℃"],
+  ror1:            ["TC1 升温速率", "℃/min"],
+  t2:              ["探针 TC2", "℃"],
+  ror2:            ["TC2 升温速率", "℃/min"],
+  boom1_count:     ["一爆次数", ""],
+  boom2_count:     ["二爆次数", ""],
+};
+
+function renderFields() {
+  fieldList.innerHTML = Object.entries(FIELD_META).map(([key, [label, unit]]) => {
+    const uid = 'fld_' + key;
+    return `<label class="field-check" for="${uid}">
+      <input type="checkbox" id="${uid}" data-key="${key}" checked onchange="applyFieldVisibility()">
+      <span class="checkbox"></span>
+      <span>${label}${unit ? ' (' + unit + ')' : ''}</span>
+    </label>`;
+  }).join('');
+}
+renderFields();
+
+function applyFieldVisibility() {
+  const selected = [];
+  fieldList.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    const item = document.getElementById('item-' + cb.dataset.key);
+    if (item) {
+      item.classList.toggle('hidden', !cb.checked);
+    }
+    if (cb.checked) selected.push(cb.dataset.key);
+  });
+  // 色值取消勾选时隐藏 hero 区域
+  const agtronCB = document.getElementById('fld_agtron');
+  const heroArea = document.getElementById('heroArea');
+  if (heroArea && agtronCB) {
+    heroArea.style.display = agtronCB.checked ? '' : 'none';
+  }
+  // 同步到后端，用于过滤 omniflux_latest.txt 的输出字段
+  fetch('/api/fields', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: selected })
+  }).catch(() => {});
+}
+
+function selectAll() {
+  fieldList.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = true; });
+  applyFieldVisibility();
+}
+function deselectAll() {
+  fieldList.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+  applyFieldVisibility();
+}
+
+/* ===================== INIT ===================== */
+renderActions();
+connectWS();
+
+// Initial status fetch
+(async () => {
+  try {
+    const res = await fetch('/api/status');
+    const st = await res.json();
+    if (st.connected) {
+      setConnected(true, st.device_name);
+      packetBadge.textContent = `接收 ${st.packet_count}`;
+    }
+  } catch (e) { /* server not ready */ }
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1110 @@
+
+袁邦淼（Burt）
+测试组
+OK
+袁邦淼（Burt） 撤回了一条消息
+对了，还有m1标定失败的界面
+回复 袁邦淼（Burt）: 
+对了，还有m1标定失败的界面
+都快忘记了
+哈哈，刚好我提醒你看[看]
+这样，每一次标定失败都调用这个页面
+yes,不过只会时在最后一次拟合数据时才会报这个错误
+不好意思，好像还有一个界面，就是当三个真值输入相差小于1时需要提醒用户重新输入
+捂脸[捂脸]
+好
+这样吧，一进来就提示，然后错了就强提示。不要等到他错了才开始提示，就有点晚了。
+可以，进来就有提示，然后如果他执迷不悟输入小于1的值再提示一次
+刚进来是白色文本提示，再执迷不悟就红色，然后直接清空他的输入，强制输入符合要求的值
+可以
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import threading
+import time
+import struct
+from datetime import datetime
+from typing import Optional, List
+import queue
+import re
+import sys
+import warnings
+import logging
+import os
+
+# 禁用所有警告和日志
+warnings.filterwarnings("ignore")
+logging.disable(logging.CRITICAL)
+
+# 禁用pkg_resources警告
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+# 重定向stderr来屏蔽警告
+class DevNull:
+    def write(self, msg):
+        if "pkg_resources is deprecated" not in msg:
+            pass
+    def flush(self):
+        pass
+_original_stdout = sys.stdout
+
+# 重定向stderr
+sys.stderr = DevNull()
+
+
+class SensorData:
+    """传感器数据结构"""
+    def __init__(self):
+        self.time_sec: int = 0      # 在线检测时间 (s)
+        self.distance: int = 0      # TOF 距离 (mm)
+        self.agtron: float = 0.0    # 当前色值
+        self.roc: float = 0.0       # 色值变化率 (Agtron/min)
+        self.t1: float = 0.0        # 探针 TC1 (℃)
+        self.ror1: float = 0.0      # TC1 升温速率 ROR (℃/min)
+        self.t2: float = 0.0        # 探针 TC2 (℃)
+        self.ror2: float = 0.0      # TC2 升温速率 (℃/min)
+        self.t1_valid: int = 0      # TC1 有效标志
+        self.t2_valid: int = 0      # TC2 有效标志
+        self.boom1_count: int = 0   # 一爆次数
+        self.boom2_count: int = 0   # 二爆次数
+
+
+class OmniFluxDataParser:
+    """数据解析器"""
+
+    @staticmethod
+    def parse_response(data: bytes) -> Optional[SensorData]:
+        """解析响应数据"""
+        if len(data) < 38:
+            return None
+
+        try:
+            sensor = SensorData()
+
+            offset = 0
+
+            if len(data) >= offset + 4:
+                sensor.time_sec = struct.unpack('<I', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.distance = struct.unpack('<I', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.agtron = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.roc = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.t1 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.ror1 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.t2 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.ror2 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 1:
+                sensor.t1_valid = data[offset]
+                offset += 1
+            if len(data) >= offset + 1:
+                sensor.t2_valid = data[offset]
+                offset += 1
+            if len(data) >= offset + 2:
+                sensor.boom1_count = struct.unpack('<H', data[offset:offset+2])[0]
+                offset += 2
+            if len(data) >= offset + 2:
+                sensor.boom2_count = struct.unpack('<H', data[offset:offset+2])[0]
+
+            return sensor
+        except Exception:
+            return None
+
+
+class BluetoothDebugger:
+    """蓝牙"""
+
+    CHAR_UUID_PLAIN = "0000aa01-0000-1000-8000-00805f9b34fb"
+    CHAR_UUID_ENCRYPT = "0000ff01-0000-1000-8000-00805f9b34fb"
+    REQUEST_DATA_CMD = bytes([0xdf, 0xdf, 0x03, 0x05, 0x00, 0xc6])
+
+    def __init__(self):
+        self.client = None
+        self._connected = False
+        self._notify_enabled = False
+        self._recv_queue = queue.Queue()
+        self._running = False
+        self._loop_thread = None
+        self._loop = None
+        self.write_char = None
+        self.notify_char = None
+        self.device_name = None
+        self.device_address = None
+        self.on_data_received = None
+        self._silent = True
+
+        self._auto_send_running = False
+        self._auto_send_thread = None
+        self._auto_send_interval = 1
+
+    def _run_async(self, coro, timeout=30):
+        import asyncio
+        if not self._loop or not self._loop.is_running():
+            self.start()
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
+    def start(self):
+        import asyncio
+        if self._loop_thread and self._loop_thread.is_alive():
+            return
+        self._running = True
+
+        def run_loop():
+            import asyncio
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._loop_thread.start()
+        for _ in range(20):
+            if self._loop and self._loop.is_running():
+                break
+            time.sleep(0.05)
+
+    def stop(self):
+        self._running = False
+        self.stop_auto_send()
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def scan_omniflux_devices(self, timeout: float = 5.0) -> List[dict]:
+        import asyncio
+        from bleak import BleakScanner
+
+        devices = []
+
+        def detection_callback(device, advertisement_data):
+            if device.name and "OmniFlux" in device.name:
+                if not any(d['address'] == device.address for d in devices):
+                    devices.append({
+                        'name': device.name,
+                        'address': device.address,
+                        'rssi': advertisement_data.rssi if advertisement_data else -100
+                    })
+
+        async def scan():
+            scanner = BleakScanner(detection_callback)
+            await scanner.start()
+            await asyncio.sleep(timeout)
+            await scanner.stop()
+            return devices
+
+        result = self._run_async(scan(), timeout=timeout+1)
+        return sorted(result, key=lambda x: x['rssi'], reverse=True)
+
+    def connect(self, address: str) -> bool:
+        import asyncio
+        from bleak import BleakClient
+
+        async def connect_async():
+            try:
+                # 超时时间
+                self.client = BleakClient(address, timeout=15.0)
+                await self.client.connect()
+
+                if self.client.is_connected:
+                    self._connected = True
+                    self.device_address = address
+                    try:
+                        self.device_name = await self.client.get_device_name()
+                    except:
+                        self.device_name = address
+
+                    await self._find_characteristics()
+
+                    if self.notify_char:
+                        await self.client.start_notify(
+                            self.notify_char.uuid,
+                            self._notification_handler
+                        )
+                        self._notify_enabled = True
+
+                    self.start_auto_send()
+                    return True
+            except Exception:
+                pass
+            return False
+
+        return self._run_async(connect_async(), timeout=20)
+
+    async def _find_characteristics(self):
+        self.write_char = None
+        self.notify_char = None
+
+        for service in self.client.services:
+            for char in service.characteristics:
+                char_uuid = char.uuid.lower()
+                if char_uuid == self.CHAR_UUID_PLAIN.lower():
+                    self.write_char = char
+                    self.notify_char = char
+                    self.current_channel = "plain"
+                elif char_uuid == self.CHAR_UUID_ENCRYPT.lower() and not self.write_char:
+                    self.write_char = char
+                    self.notify_char = char
+                    self.current_channel = "encrypt"
+
+    def _notification_handler(self, sender: int, data: bytes):
+        self._recv_queue.put(data)
+        if self.on_data_received:
+            self.on_data_received(data)
+
+    def disconnect(self):
+        self.stop_auto_send()
+
+        async def disconnect_async():
+            if self.client and self.client.is_connected:
+                try:
+                    if self.notify_char and self._notify_enabled:
+                        await self.client.stop_notify(self.notify_char.uuid)
+                except:
+                    pass
+                try:
+                    await self.client.disconnect()
+                except:
+                    pass
+            # 无论是否成功，重置状态
+            self._connected = False
+            self._notify_enabled = False
+            self.client = None  # 清空引用
+
+        try:
+            self._run_async(disconnect_async(), timeout=5)
+        except:
+            # 即使异常也重置状态
+            self._connected = False
+            self._notify_enabled = False
+            self.client = None
+
+    def send(self, data: bytes) -> bool:
+        if not self._connected or not self.client or not self.client.is_connected:
+            return False
+        if not self.write_char:
+            return False
+
+        async def send_async():
+            await self.client.write_gatt_char(self.write_char.uuid, data)
+            return True
+
+        try:
+            return self._run_async(send_async(), timeout=5)
+        except:
+            return False
+
+    def send_hex(self, hex_str: str) -> bool:
+        try:
+            hex_str = hex_str.strip().replace(' ', '').replace('-', '').replace(':', '')
+            if len(hex_str) % 2 != 0:
+                hex_str = '0' + hex_str
+            data = bytes.fromhex(hex_str)
+            return self.send(data)
+        except:
+            return False
+
+    def start_auto_send(self):
+        if self._auto_send_running:
+            return
+
+        self._auto_send_running = True
+        self._auto_send_thread = threading.Thread(target=self._auto_send_loop, daemon=True)
+        self._auto_send_thread.start()
+
+    def stop_auto_send(self):
+        self._auto_send_running = False
+        if self._auto_send_thread and self._auto_send_thread.is_alive():
+            self._auto_send_thread.join(timeout=1)
+
+    def _auto_send_loop(self):
+        while self._auto_send_running and self._connected:
+            if self.write_char:
+                try:
+                    self.send(self.REQUEST_DATA_CMD)
+                except:
+                    pass
+            time.sleep(self._auto_send_interval)
+
+    def set_auto_send_interval(self, interval: float):
+        self._auto_send_interval = interval
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def is_notify_enabled(self) -> bool:
+        return self._notify_enabled
+
+
+class OmniFluxBluetoothApp:
+    """主应用程序"""
+
+    FIELDS = ['time_sec', 'distance', 'agtron', 'roc', 
+              't1', 'ror1', 't2', 'ror2',
+              't1_valid', 't2_valid', 'boom1_count', 'boom2_count']
+
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("OmniFlux")
+        self.root.geometry("950x700")      
+        self.root.minsize(950, 700)       
+        self.root.configure(bg="#1a1a2e")
+
+        # 获取数据文件路径
+        if getattr(sys, 'frozen', False):
+            # 打包后，使用 exe 所在目录
+            base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        else:
+            # 调试时，使用脚本所在目录
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.data_file = os.path.join(base_dir, "omniflux_latest.txt")
+
+        # 确保文件存在，如果不存在则创建
+        if not os.path.exists(self.data_file):
+            try:
+                with open(self.data_file, 'w') as f:
+                    f.write("0,0,0,0,0,0,0,0,0,0,0,0")
+                # 使用 print 而不是 _log_ui，因为此时 UI 还没创建
+                print(f"已创建数据文件: {self.data_file}")
+            except Exception as e:
+                print(f"创建文件失败: {e}")
+
+        # 蓝牙
+        self.debugger = BluetoothDebugger()
+        self.debugger.on_data_received = self.on_bluetooth_data
+
+        # 解析
+        self.parser = OmniFluxDataParser()
+
+        # 状态
+        self.devices = []
+        self.scanning = False
+        self.packet_count = 0
+
+        # 输出格式
+        self.selected_fields = {}
+        self.output_enabled = True
+
+        # 创建UI
+        self._create_widgets()
+
+        # 启动蓝牙事件循环
+        self.debugger.start()
+
+        # 自动扫描
+        self.after(1000, self.scan_devices)
+
+        # 接收数据轮询
+        self._start_polling()
+
+        self._log_ui(f"程序启动完成，数据文件: {self.data_file}")
+
+    def _create_widgets(self):
+        """创建界面"""
+        BG_MAIN = "#1a1a2e"
+        BG_CARD = "#16213e"
+        BG_INPUT = "#0f172a"
+        PRIMARY = "#22c55e"
+        ACCENT = "#3b82f6"
+        TEXT = "#ffffff"
+        TEXT_SEC = "#888888"
+
+        main = tk.Frame(self.root, bg=BG_MAIN)
+        main.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # ========== 顶部标题栏 ==========
+        title_frame = tk.Frame(main, bg=BG_MAIN)
+        title_frame.pack(fill="x", pady=(0, 15))
+
+        tk.Label(title_frame, text="📷 OmniFlux调试工具", 
+                font=("Microsoft YaHei", 18, "bold"),
+                fg=PRIMARY, bg=BG_MAIN).pack(side="left")
+
+        # 状态指示
+        status_frame = tk.Frame(title_frame, bg=BG_MAIN)
+        status_frame.pack(side="right")
+
+        self.status_canvas = tk.Canvas(status_frame, width=14, height=14, bg=BG_MAIN, highlightthickness=0)
+        self.status_canvas.pack(side="left", padx=(0, 6))
+        self.status_circle = self.status_canvas.create_oval(2, 2, 12, 12, fill="#888888", outline="")
+
+        self.status_label = tk.Label(status_frame, text="未连接", 
+                                      font=("Microsoft YaHei", 10),
+                                      fg=TEXT_SEC, bg=BG_MAIN)
+        self.status_label.pack(side="left")
+
+        # 控制区
+        top_frame = tk.Frame(main, bg=BG_MAIN)
+        top_frame.pack(fill="both", expand=True)
+
+        # 设备控制
+        left_frame = tk.Frame(top_frame, bg=BG_MAIN)
+        left_frame.pack(side="left", fill="y", padx=(0, 15))
+
+        # 设备连接
+        device_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        device_card.pack(fill="x", pady=(0, 15))
+
+        tk.Label(device_card, text="📱 设备连接", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        device_content = tk.Frame(device_card, bg=BG_CARD)
+        device_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        # 扫描
+        scan_frame = tk.Frame(device_content, bg=BG_CARD)
+        scan_frame.pack(fill="x", pady=(0, 10))
+
+        self.device_var = tk.StringVar()
+        self.device_combo = ttk.Combobox(scan_frame, textvariable=self.device_var,
+                                         state="readonly", font=("Consolas", 9),
+                                         width=30)
+        self.device_combo.pack(side="left", padx=(0, 8), fill="x", expand=True)
+
+        self.scan_btn = tk.Button(scan_frame, text="扫描", command=self.scan_devices,
+                                  bg=BG_CARD, fg=PRIMARY, font=("Microsoft YaHei", 9),
+                                  relief="solid", bd=1, cursor="hand2", width=6)
+        self.scan_btn.pack(side="left")
+
+        # 按钮
+        btn_frame = tk.Frame(device_content, bg=BG_CARD)
+        btn_frame.pack(fill="x")
+
+        self.connect_btn = tk.Button(btn_frame, text="连接设备", command=self.connect_device,
+                                     bg=PRIMARY, fg="black", font=("Microsoft YaHei", 9, "bold"),
+                                     relief="flat", cursor="hand2", width=12)
+        self.connect_btn.pack(side="left", padx=(0, 8))
+
+        self.disconnect_btn = tk.Button(btn_frame, text="断开连接", command=self.disconnect_device,
+                                        bg=BG_CARD, fg=TEXT_SEC, font=("Microsoft YaHei", 9),
+                                        relief="solid", bd=1, cursor="hand2", width=12,
+                                        state="disabled")
+        self.disconnect_btn.pack(side="left")
+
+        # 参数
+        params_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        params_card.pack(fill="x", pady=(0, 15))
+
+        tk.Label(params_card, text="⚙️ 参数设置", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        params_content = tk.Frame(params_card, bg=BG_CARD)
+        params_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        # 采样间隔
+        interval_frame = tk.Frame(params_content, bg=BG_CARD)
+        interval_frame.pack(fill="x", pady=5)
+
+        tk.Label(interval_frame, text="采样间隔:", font=("Microsoft YaHei", 9),
+                fg=TEXT, bg=BG_CARD, width=10, anchor="w").pack(side="left")
+
+        self.interval_var = tk.StringVar(value="1")
+        tk.Entry(interval_frame, textvariable=self.interval_var,
+                 font=("Consolas", 9), width=5,
+                 bg=BG_INPUT, fg=TEXT, relief="flat").pack(side="left", padx=(0, 5))
+
+        tk.Label(interval_frame, text="秒", font=("Microsoft YaHei", 9),
+                fg=TEXT_SEC, bg=BG_CARD).pack(side="left", padx=(0, 8))
+
+        tk.Button(interval_frame, text="应用", command=self.set_send_interval,
+                 bg=ACCENT, fg="white", font=("Microsoft YaHei", 8),
+                 relief="flat", cursor="hand2", width=5).pack(side="left")
+
+        # 统计
+        stats_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        stats_card.pack(fill="x")
+
+        tk.Label(stats_card, text="📈 统计", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        stats_content = tk.Frame(stats_card, bg=BG_CARD)
+        stats_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        self.packet_label = tk.Label(stats_content, text="接收数据包: 0",
+                                      font=("Microsoft YaHei", 9),
+                                      fg=PRIMARY, bg=BG_CARD)
+        self.packet_label.pack(anchor="w")
+
+        # 字段选择
+        right_frame = tk.Frame(top_frame, bg=BG_MAIN)
+        right_frame.pack(side="left", fill="both", expand=True)
+
+        field_card = tk.Frame(right_frame, bg=BG_CARD, relief="flat", bd=0)
+        field_card.pack(fill="both", expand=True)
+
+        tk.Label(field_card, text="✅ 选择输出字段", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        field_content = tk.Frame(field_card, bg=BG_CARD)
+        field_content.pack(fill="both", expand=True, padx=15, pady=(0, 12))
+
+        # 快捷按钮
+        btn_row = tk.Frame(field_content, bg=BG_CARD)
+        btn_row.pack(fill="x", pady=(0, 10))
+
+        tk.Button(btn_row, text="全选", command=self.select_all,
+                 bg=ACCENT, fg="white", font=("Microsoft YaHei", 8),
+                 relief="flat", cursor="hand2", width=6).pack(side="left", padx=(0, 8))
+
+        tk.Button(btn_row, text="取消全选",
+import tkinter as tk
+从tkinter导入ttk、messagebox、scrolledtext
+导入 threading
+import time
+import struct
+from datetime import datetime
+从 typing 导入 Optional, List
+导入队列
+import re
+导入 sys
+导入警告模块
+导入日志记录模块
+导入 os
+
+# 禁用所有警告和日志
+warnings.filterwarnings("ignore")
+logging.disable(logging.CRITICAL)
+
+# 禁用pkg_resources警告
+os.environ["PYTHONWARNINGS"] = "ignore"
+
+# 重定向stderr来屏蔽警告
+class DevNull:
+    def write(self, msg):
+        if "pkg_resources is deprecated" not in msg:
+            跳过
+    def flush(self):
+        pass
+_original_stdout = sys.stdout
+
+# 重定向stderr
+sys.stderr = DevNull()
+
+
+class SensorData:
+    """传感器数据结构"""
+    def __init__(self):
+        self.time_sec: int = 0      # 在线检测时间 (SEC)
+        self.distance: int = 0      # TOF 距离 (mm)
+        self.agtron: float = 0.0    # 当前色值
+        self.roc: float = 0.0       # 色值变化率 (Agtron/min)
+        self.t1: float = 0.0        # 探针 TC1 (℃)
+        self.ror1: float = 0.0      # TC1 升温速率 ROR (℃/min)
+        self.t2: float = 0.0        # 探针 TC2 (℃)
+        self.ror2: float = 0.0      # TC2 升温速率 (℃/min)
+        self.t1_valid: int = 0      # TC1有效标志
+        self.t2_valid: int = 0      # TC2有效标志
+        self.boom1_count: int = 0   # 一爆次数
+        self.boom2_count: int = 0   # 二爆次数
+
+
+类 OmniFluxDataParser:
+    """数据解析器"""
+
+    @staticmethod
+    def parse_response(data: bytes) -> Optional[SensorData]:
+        """解析响应数据"""
+        if len(data) < 38:
+            返回 None
+
+        try:
+            sensor = SensorData()
+
+            offset = 0
+
+            if len(data) >= offset + 4:
+                sensor.time_sec = struct.unpack('<I', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.distance = struct.unpack('<I', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.agtron = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.roc = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.t1 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.ror1 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.t2 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 4:
+                sensor.ror2 = struct.unpack('<f', data[offset:offset+4])[0]
+                offset += 4
+            if len(data) >= offset + 1:
+                sensor.t1_valid = data[offset]
+                offset += 1
+            if len(data) >= offset + 1:
+                sensor.t2_valid = data[offset]
+                offset += 1
+            if len(data) >= offset + 2:
+                sensor.boom1_count = struct.unpack('<H', data[offset:offset+2])[0]
+                offset += 2
+            if len(data) >= offset + 2:
+                sensor.boom2_count = struct.unpack('<H', data[offset:offset+2])[0]
+
+            返回传感器
+        except Exception:
+            返回 None
+
+
+class BluetoothDebugger:
+    """蓝牙"""
+
+    CHAR_UUID_PLAIN = "0000aa01-0000-1000-8000-00805f9b34fb"
+    CHAR_UUID_ENCRYPT = "0000ff01-0000-1000-8000-00805f9b34fb"
+    REQUEST_DATA_CMD = bytes([0xdf, 0xdf, 0x03, 0x05, 0x00, 0xc6])
+
+    def __init__(self):
+        self.client = None
+        self._connected = False
+        self._notify_enabled = False
+        self._recv_queue = queue.Queue()
+        self._running = False
+        self._loop_thread = None
+        self._loop = None
+        self.write_char = None
+        self.notify_char = None
+        self.device_name = None
+        self.device_address = None
+        self.on_data_received = None
+        self._silent = True
+
+        self._auto_send_running = False
+        self._auto_send_thread = None
+        self._auto_send_interval = 1
+
+    def _run_async(self, coro, timeout=30):
+        import asyncio
+        if not self._loop or not self._loop.is_running():
+            self.start()
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
+    def start(self):
+        import asyncio
+        if self._loop_thread and self._loop_thread.is_alive():
+            返回
+        self._running = True
+
+        def run_loop():
+            import asyncio
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+
+        self._loop_thread = threading.Thread(target=run_loop, daemon=True)
+        self._loop_thread.start()
+        for _ in range(20):
+            if self._loop and self._loop.is_running():
+                break
+            time.sleep(0.05)
+
+    def stop(self):
+        self._running = False
+        self.stop_auto_send()
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def scan_omniflux_devices(self, timeout: float = 5.0) -> List[dict]:
+        import asyncio
+        from bleak import BleakScanner
+
+        devices = []
+
+        def detection_callback(device, advertisement_data):
+            if device.name and "OmniFlux" in device.name:
+                if not any(d['address'] == device.address for d in devices):
+                    devices.append({
+                        'name': device.name,
+                        'address': device.address,
+                        'rssi': advertisement_data.rssi if advertisement_data else -100
+                    })
+
+        async def scan():
+            scanner = BleakScanner(detection_callback)
+            await scanner.start()
+            await asyncio.sleep(timeout)
+            await scanner.stop()
+            返回设备
+
+        result = self._run_async(scan(), timeout=timeout+1)
+        return sorted(result, key=lambda x: x['rssi'], reverse=True)
+
+    def connect(self, address: str) -> bool:
+        import asyncio
+        from bleak import BleakClient
+
+        async def connect_async():
+            try:
+                # 超时时间
+                self.client = BleakClient(address, timeout=15.0)
+                await self.client.connect()
+
+                if self.client.is_connected:
+                    self._connected = True
+                    self.device_address = address
+                    try:
+                        self.device_name = await self.client.get_device_name()
+                    except:
+                        self.device_name = address
+
+                    await self._find_characteristics()
+
+                    if self.notify_char:
+                        await self.client.start_notify(
+                            self.notify_char.uuid,
+                            self._notification_handler
+                        )
+                        self._notify_enabled = True
+
+                    self.start_auto_send()
+                    返回 True
+            except Exception:
+                pass
+            返回 False
+
+        return self._run_async(connect_async(), timeout=20)
+
+    async def _find_characteristics(self):
+        self.write_char = None
+        self.notify_char = None
+
+        for service in self.client.services:
+            for char in service.characteristics:
+                char_uuid = char.uuid.lower()
+                if char_uuid == self.CHAR_UUID_PLAIN.lower():
+                    self.write_char = char
+                    self.notify_char = char
+                    self.current_channel = "plain"
+                elif char_uuid == self.CHAR_UUID_ENCRYPT.lower() and not self.write_char:
+                    self.write_char = char
+                    self.notify_char = char
+                    self.current_channel = "encrypt"
+
+    def _notification_handler(self, sender: int, data: bytes):
+        self._recv_queue.put(data)
+        if self.on_data_received:
+            self.on_data_received(data)
+
+    def disconnect(self):
+        self.stop_auto_send()
+
+        async def disconnect_async():
+            if self.client and self.client.is_connected:
+                try:
+                    if self.notify_char and self._notify_enabled:
+                        await self.client.stop_notify(self.notify_char.uuid)
+                除外：
+                    跳过
+                try:
+                    await self.client.disconnect()
+                except:
+                    跳过
+            # 无论是否成功，重置状态
+            self._connected = False
+            self._notify_enabled = False
+            self.client = None  # 清空引用
+
+        try:
+            self._run_async(disconnect_async(), timeout=5)
+        除外：
+            # 即使异常也重置状态
+            self._connected = False
+            self._notify_enabled = False
+            self.client = None
+
+    def send(self, data: bytes) -> bool:
+        if not self._connected or not self.client or not self.client.is_connected:
+            返回 False
+        if not self.write_char:
+            返回 False
+
+        async def send_async():
+            await self.client.write_gatt_char(self.write_char.uuid, data)
+            返回 True
+
+        try:
+            return self._run_async(send_async(), timeout=5)
+        异常处理：
+            返回 False
+
+    def send_hex(self, hex_str: str) -> bool:
+        try:
+            hex_str = hex_str.strip().replace(' ', '').replace('-', '').replace(':', '')
+            if len(hex_str) % 2!= 0:
+                hex_str = '0' + hex_str
+            data = bytes.fromhex(hex_str)
+            return self.send(data)
+        异常处理：
+            返回 False
+
+    def start_auto_send(self):
+        if self._auto_send_running:
+            返回
+
+        self._auto_send_running = True
+        self._auto_send_thread = threading.Thread(target=self._auto_send_loop, daemon=True)
+        self._auto_send_thread.start()
+
+    def stop_auto_send(self):
+        self._auto_send_running = False
+        if self._auto_send_thread and self._auto_send_thread.is_alive():
+            self._auto_send_thread.join(timeout=1)
+
+    def _auto_send_loop(self):
+        while self._auto_send_running and self._connected:
+            if self.write_char:
+                try:
+                    self.send(self.REQUEST_DATA_CMD)
+                except:
+                    跳过
+            time.sleep(self._auto_send_interval)
+
+    def set_auto_send_interval(self, interval: float):
+        self._auto_send_interval = interval
+
+    @属性
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @属性
+    def is_notify_enabled(self) -> bool:
+        返回 self._notify_enabled
+
+
+类 OmniFluxBluetoothApp:
+    """主应用程序"""
+
+    FIELDS = ['time_sec', 'distance', 'agtron', 'roc', 
+              't1', 'ror1', 't2', 'ror2',
+              't1_valid', 't2_valid', 'boom1_count', 'boom2_count']
+
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("OmniFlux")
+        self.root.geometry("950x700")      
+        self.root.minsize(950, 700)       
+        self.root.configure(BG="#1a1a2e")
+
+        # 获取数据文件路径
+        if getattr(sys, 'frozen', False):
+            # 打包后，使用 exe 所在目录
+            base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        否则:
+            # 调试时，使用脚本所在目录
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        self.data_file = os.path.join(base_dir, "omniflux_latest.txt")
+
+        # 确保文件存在，如果不存在则创建
+        if not os.path.exists(self.data_file):
+            try:
+                with open(self.data_file, 'w') as f:
+                    f.write("0,0,0,0,0,0,0,0,0,0,0,0")
+                # 使用 print 而不是 _log_ui，因为此时 UI 还没创建
+                print(f"已创建数据文件: {self.data_file}")
+            except Exception as e:
+                print(f"创建文件失败: {e}")
+
+        # 蓝牙
+        self.debugger = BluetoothDebugger()
+        self.debugger.on_data_received = self.on_bluetooth_data
+
+        # 解析
+        self.parser = OmniFluxDataParser()
+
+        # 状态
+        self.devices = []
+        self.scanning = False
+        self.packet_count = 0
+
+        # 输出格式
+        self.selected_fields = {}
+        self.output_enabled = True
+
+        # 创建UI
+        self._create_widgets()
+
+        # 启动蓝牙事件循环
+        self.debugger.start()
+
+        # 自动扫描
+        self.after(1000, self.scan_devices)
+
+        # 接收数据轮询
+        self._start_polling()
+
+        self._log_ui(f"程序启动完成，数据文件: {self.data_file}")
+
+    def _create_widgets(self):
+        """创建界面"""
+        BG_MAIN = "#1a1a2e"
+        BG_CARD = "#16213e"
+        BG_INPUT = "#0f172a"
+        PRIMARY = "#22c55e"
+        强调色 = "#3b82f6"
+        TEXT = "#ffffff"
+        TEXT_SEC = "#888888"
+
+        main = tk.Frame(self.root, bg=BG_MAIN)
+        main.pack(fill="both", expand=True, padx=15, pady=15)
+
+        # ========== 顶部标题栏 ==========
+        title_frame = tk.Frame(main, bg=BG_MAIN)
+        title_frame.pack(fill="x", pady=(0, 15))
+
+        tk.Label(title_frame, text="📷 OmniFlux调试工具", 
+                font=("Microsoft YaHei", 18, "bold"),
+                fg=PRIMARY, bg=BG_MAIN).pack(side="left")
+
+        # 状态指示
+        status_frame = tk.Frame(title_frame, bg=BG_MAIN)
+        status_frame.pack(side="right")
+
+        self.status_canvas = tk.Canvas(status_frame, width=14, height=14, bg=BG_MAIN, highlightthickness=0)
+        self.status_canvas.pack(side="left", padx=(0, 6))
+        self.status_circle = self.status_canvas.create_oval(2, 2, 12, 12, fill="#888888", outline="")
+
+        self.status_label = tk.Label(status_frame, text="未连接", 
+                                      font=("Microsoft YaHei", 10),
+                                      fg=TEXT_SEC, bg=BG_MAIN)
+        self.status_label.pack(side="left")
+
+        # 控制区
+        top_frame = tk.Frame(main, bg=BG_MAIN)
+        top_frame.pack(fill="both", expand=True)
+
+        # 设备控制
+        left_frame = tk.Frame(top_frame, bg=BG_MAIN)
+        left_frame.pack(side="left", fill="y", padx=(0, 15))
+
+        # 设备连接
+        device_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        device_card.pack(fill="x", pady=(0, 15))
+
+        tk.Label(device_card, text="📱 设备连接", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        device_content = tk.Frame(device_card, bg=BG_CARD)
+        device_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        # 扫描
+        scan_frame = tk.Frame(device_content, bg=BG_CARD)
+        scan_frame.pack(fill="x", pady=(0, 10))
+
+        self.device_var = tk.StringVar()
+        self.device_combo = ttk.Combobox(scan_frame, textvariable=self.device_var,
+                                         state="readonly", font=("Consolas", 9),
+                                         width=30)
+        self.device_combo.pack(side="left", padx=(0, 8), fill="x", expand=True)
+
+        self.scan_btn = tk.Button(scan_frame, text="扫描", command=self.scan_devices,
+                                  bg=BG_CARD, fg=PRIMARY, font=("Microsoft YaHei", 9),
+                                  relief="solid", bd=1, cursor="hand2", width=6)
+        self.scan_btn.pack(side="left")
+
+        # 按钮
+        btn_frame = tk.Frame(device_content, bg=BG_CARD)
+        btn_frame.pack(fill="x")
+
+        self.connect_btn = tk.Button(btn_frame, text="连接设备", command=self.connect_device,
+                                     BG=PRIMARY, FG="black", font=("Microsoft YaHei", 9, "bold"),
+                                     relief="flat", cursor="hand2", width=12)
+        self.connect_btn.pack(side="left", padx=(0, 8))
+
+        self.disconnect_btn = tk.Button(btn_frame, text="断开连接", command=self.disconnect_device,
+                                        bg=BG_CARD, fg=TEXT_SEC, font=("Microsoft YaHei", 9),
+                                        relief="solid", bd=1, cursor="hand2", width=12,
+                                        state="disabled")
+        self.disconnect_btn.pack(side="left")
+
+        # 参数
+        params_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        params_card.pack(fill="x", pady=(0, 15))
+
+        tk.Label(params_card, text="⚙️ 参数设置", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        params_content = tk.Frame(params_card, bg=BG_CARD)
+        params_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        # 采样间隔
+        interval_frame = tk.Frame(params_content, bg=BG_CARD)
+        interval_frame.pack(fill="x", pady=5)
+
+        tk.Label(interval_frame, text="采样间隔:", font=("Microsoft YaHei", 9),
+                fg=TEXT, bg=BG_CARD, width=10, anchor="w").pack(side="left")
+
+        self.interval_var = tk.StringVar(value="1")
+        tk.Entry(interval_frame, textvariable=self.interval_var,
+                 font=("Consolas", 9), width=5,
+                 bg=BG_INPUT, fg=TEXT, relief="flat").pack(side="left", padx=(0, 5))
+
+        tk.Label(interval_frame, text="秒", font=("Microsoft YaHei", 9),
+                fg=TEXT_SEC, bg=BG_CARD).pack(side="left", padx=(0, 8))
+
+        tk.Button(interval_frame, text="应用", command=self.set_send_interval,
+                 bg=ACCENT, fg="white", font=("Microsoft YaHei", 8),
+                 relief="flat", cursor="hand2", width=5).pack(side="left")
+
+        # 统计
+        stats_card = tk.Frame(left_frame, bg=BG_CARD, relief="flat", bd=0)
+        stats_card.pack(fill="x")
+
+        tk.Label(stats_card, text="📈 统计", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        stats_content = tk.Frame(stats_card, bg=BG_CARD)
+        stats_content.pack(fill="x", padx=15, pady=(0, 12))
+
+        self.packet_label = tk.Label(stats_content, text="接收数据包: 0",
+                                      font=("Microsoft YaHei", 9),
+                                      fg=PRIMARY, bg=BG_CARD)
+        self.packet_label.pack(anchor="w")
+
+        # 字段选择
+        right_frame = tk.Frame(top_frame, bg=BG_MAIN)
+        right_frame.pack(side="left", fill="both", expand=True)
+
+        field_card = tk.Frame(right_frame, bg=BG_CARD, relief="flat", bd=0)
+        field_card.pack(fill="both", expand=True)
+
+        tk.Label(field_card, text="✅ 选择输出字段", font=("Microsoft YaHei", 12, "bold"),
+                fg=ACCENT, bg=BG_CARD).pack(anchor="w", padx=15, pady=(10, 8))
+
+        field_content = tk.Frame(field_card, bg=BG_CARD)
+        field_content.pack(fill="both", expand=True, padx=15, pady=(0, 12))
+
+        # 快捷按钮
+        btn_row = tk.Frame(field_content, bg=BG_CARD)
+        btn_row.pack(fill="x", pady=(0, 10))
+
+        tk.Button(btn_row, text="全选", command=self.select_all,
+                 BG=ACCENT, FG="white", font=("Microsoft YaHei", 8),
+                 relief="flat", cursor="hand2", width=6).pack(side="left", padx=(0, 8))
+
+        tk.Button(btn_row, text="取消全选",
+翻译反馈
+OmniFlux.exe
+6.0 MB
+​​​
+Shift + Enter 换行
