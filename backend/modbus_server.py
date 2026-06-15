@@ -5,58 +5,58 @@ import socket
 import threading
 import time
 
-# Register map (each float32 = 2 registers of 16 bits)
-# REG_ADDR | Field         | Type    | Width
-# ---------|---------------|---------|------
-# 0        | time_sec      | uint32  | 2
-# 2        | distance      | uint32  | 2
-# 4        | agtron        | float32 | 2
-# 6        | roc           | float32 | 2
-# 8        | t1            | float32 | 2
-# 10       | ror1          | float32 | 2
-# 12       | t2            | float32 | 2
-# 14       | ror2          | float32 | 2
-# 16       | t1_valid      | uint16  | 1
-# 17       | t2_valid      | uint16  | 1
-# 18       | boom1_count   | uint16  | 1
-# 19       | boom2_count   | uint16  | 1
-# 20       | packet_count  | uint16  | 1
+# Register map — single int16 registers with ×10 scaling for decimals
+# Designed for Artisan: set div=10 on temperature/probe inputs
+#
+# REG | Field        | Scale | Artisan div | Notes
+# ----|--------------|-------|-------------|------------------
+# 0   | agtron       | ×10   | 10          | Color value
+# 1   | roc          | ×10   | 10          | RoC Agtron/min
+# 2   | distance     | ×1    | 1           | TOF mm
+# 3   | t1           | ×10   | 10          | Probe TC1 (°C)
+# 4   | ror1         | ×10   | 10          | TC1 RoR (°C/min)
+# 5   | t2           | ×10   | 10          | Probe TC2 (°C)
+# 6   | ror2         | ×10   | 10          | TC2 RoR (°C/min)
+# 7   | boom1_count  | ×1    | 1           | First crack
+# 8   | boom2_count  | ×1    | 1           | Second crack
+# 9   | time_sec     | ×1    | 1           | Time (low 16 bits)
+# 10  | t1_valid     | ×1    | 1           | 0/1
+# 11  | t2_valid     | ×1    | 1           | 0/1
+# 12  | packet_count | ×1    | 1           | Total packets
 
-REG_TOTAL = 21  # 0..20 = 21 registers
+REG_TOTAL = 13
+
+
+def _clamp_i16(v: int) -> int:
+    """Clamp to signed 16-bit range."""
+    if v > 32767:
+        return 32767
+    if v < -32768:
+        return -32768
+    return v
 
 
 def _pack_registers(sensor, packet_count: int) -> dict:
-    """Pack current sensor data into MODBUS register dict {addr: word}."""
+    """Pack sensor data into single int16 registers with ×10 scaling."""
     regs = {}
-
-    def set_uint32(addr, value):
-        b = struct.pack("<I", value)
-        regs[addr] = struct.unpack("<H", b[0:2])[0]
-        regs[addr + 1] = struct.unpack("<H", b[2:4])[0]
-
-    def set_float32(addr, value):
-        b = struct.pack("<f", value)
-        regs[addr] = struct.unpack("<H", b[0:2])[0]
-        regs[addr + 1] = struct.unpack("<H", b[2:4])[0]
-
     if sensor is None:
         for i in range(REG_TOTAL):
             regs[i] = 0
         return regs
 
-    set_uint32(0, sensor.time_sec)
-    set_uint32(2, sensor.distance)
-    set_float32(4, sensor.agtron)
-    set_float32(6, sensor.roc)
-    set_float32(8, sensor.t1)
-    set_float32(10, sensor.ror1)
-    set_float32(12, sensor.t2)
-    set_float32(14, sensor.ror2)
-    regs[16] = sensor.t1_valid
-    regs[17] = sensor.t2_valid
-    regs[18] = sensor.boom1_count
-    regs[19] = sensor.boom2_count
-    regs[20] = packet_count
+    regs[0] = _clamp_i16(int(sensor.agtron * 10))
+    regs[1] = _clamp_i16(int(sensor.roc * 10))
+    regs[2] = _clamp_i16(sensor.distance)
+    regs[3] = _clamp_i16(int(sensor.t1 * 10))
+    regs[4] = _clamp_i16(int(sensor.ror1 * 10))
+    regs[5] = _clamp_i16(int(sensor.t2 * 10))
+    regs[6] = _clamp_i16(int(sensor.ror2 * 10))
+    regs[7] = _clamp_i16(sensor.boom1_count)
+    regs[8] = _clamp_i16(sensor.boom2_count)
+    regs[9] = sensor.time_sec & 0xFFFF
+    regs[10] = sensor.t1_valid
+    regs[11] = sensor.t2_valid
+    regs[12] = packet_count & 0xFFFF
 
     return regs
 
